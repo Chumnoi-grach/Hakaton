@@ -1,6 +1,10 @@
+import os
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
+import matplotlib.pyplot as plt
+import shap
+import numpy as np
 
 def create_student_features(df):
     features_list = []
@@ -29,16 +33,17 @@ def create_student_features(df):
         features['course_1_avg'] = student_data[student_data['SEMESTER'].isin([1, 2])]['BALLS'].dropna().mean()
         features['course_2_avg'] = student_data[student_data['SEMESTER'].isin([3, 4])]['BALLS'].dropna().mean()
 
+        for i in range(1, 4):
+            features[f'sharp_drop_{i}-{i+1}'] = 0 if abs(features[f'sem_{i + 1}_avg'] - features[f'sem_{i}_avg']) >= 1 else 1
+
         features['zach_count'] = (student_data['TYPE'] == 'зач').sum()
         features['exam_count'] = (student_data['TYPE'] == 'экз').sum()
 
         status_counts = student_data['Unnamed: 5'].value_counts()
         features['studying_count'] = status_counts.get('учится', 0)
         features['expelled_count'] = status_counts.get('отчислен', 0)
-        features['academic_count'] = status_counts.get('академ', 0)
 
         features['ever_expelled'] = 1 if features['expelled_count'] > 0 else 0
-        features['ever_academic'] = 1 if features['academic_count'] > 0 else 0
 
         if 'выпуск' in student_data.columns and pd.notna(first_row['выпуск']):
             features['target'] = 1 if first_row['выпуск'] == 'выпустился' else 0
@@ -79,11 +84,13 @@ test_df['direction_encoded'] = le_direction.transform(test_df['direction'].filln
 feature_columns = [
     'admission_year', 'avg_grade',
     'total_subjects', 'total_grades', 'zach_count', 'exam_count',
-    'studying_count', 'expelled_count', 'academic_count',
-    'ever_expelled', 'ever_academic',
+    'studying_count', 'expelled_count',
+    'ever_expelled',
     'faculty_encoded', 'direction_encoded',
     'sem_1_avg', 'sem_2_avg', 'sem_3_avg', 'sem_4_avg',
-    'course_1_avg', 'course_2_avg'
+    'course_1_avg', 'course_2_avg',
+    'sharp_drop_1-2', 'sharp_drop_2-3',
+    'sharp_drop_3-4'
 ]
 
 X_train = train_df[feature_columns].fillna(0)
@@ -111,3 +118,45 @@ submission = pd.DataFrame({
 submission.to_csv('submission.csv', index=False)
 print(f"Создан файл submission.csv с {len(submission)} предсказаниями")
 print(f"Выпускников предсказано: {test_predictions.sum()} из {len(test_predictions)}")
+
+os.makedirs('analysis_plots', exist_ok=True)
+
+feature_imp_df = pd.DataFrame({
+    'feature': feature_columns,
+    'importance': model.feature_importances_
+}).sort_values('importance', ascending=False)
+
+# Визуализация важности признаков
+plt.figure(figsize=(12, 8))
+plt.barh(feature_imp_df['feature'][:15], feature_imp_df['importance'][:15])
+plt.xlabel('Важность')
+plt.title('Топ-15 самых важных признаков (Random Forest)')
+plt.tight_layout()
+plt.savefig('analysis_plots/rf_feature_importance.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
+
+# Инициализация SHAP explainer
+explainer = shap.TreeExplainer(model)
+shap_values = explainer(X_train)
+
+if hasattr(shap_values, 'values'):
+    shap_values_array = shap_values.values
+    base_value = explainer.expected_value
+else:
+    shap_values_array = shap_values
+    base_value = explainer.expected_value
+
+if len(shap_values_array.shape) == 3:
+    shap_values_array = shap_values_array[:, :, 1]
+    if isinstance(base_value, list):
+        base_value = base_value[1]
+
+# Детальный summary plot
+plt.figure(figsize=(10, 8))
+shap.summary_plot(shap_values_array, X_train, show=False)
+plt.title("SHAP Summary Plot - Влияние признаков на прогноз")
+plt.tight_layout()
+plt.savefig('analysis_plots/shap_summary.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
