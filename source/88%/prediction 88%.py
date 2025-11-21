@@ -56,8 +56,8 @@ def create_student_features(df):
 
     return pd.DataFrame(features_list)
 
-data = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/data.csv')
-marking = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
+data = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/data.csv')
+marking = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
 
 df = data.merge(marking, left_on='PK', right_on='ИД', how='left')
 
@@ -124,7 +124,7 @@ submission.to_csv('submission.csv', index=False)
 print(f"Создан файл submission.csv с {len(submission)} предсказаниями")
 print(f"Выпускников предсказано: {test_predictions.sum()} из {len(test_predictions)}")
 
-os.makedirs('analysis_plots', exist_ok=True)
+os.makedirs('../../analysis_plots', exist_ok=True)
 
 feature_imp_df = pd.DataFrame({
     'feature': feature_columns,

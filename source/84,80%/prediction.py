@@ -12,8 +12,8 @@ def load_data():
     print("--- Загрузка данных ---")
     # Укажи правильные пути к файлам
     try:
-        data = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/data.csv')
-        marking = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
+        data = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/data.csv')
+        marking = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
         df = data.merge(marking, left_on='PK', right_on='ИД', how='left')
         return df
     except FileNotFoundError:
