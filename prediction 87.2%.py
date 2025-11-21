@@ -1,106 +1,14 @@
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import GridSearchCV
-
-
-def calculate_grade_trend(student_data):
-    """Тренд успеваемости по семестрам"""
-    if len(student_data) < 2:
-        return 0
-
-    semester_grades = student_data.groupby('SEMESTER')['BALLS'].mean().sort_index()
-
-    if len(semester_grades) < 2:
-        return 0
-
-    # Рассчитываем линейный тренд (коэффициент наклона)
-    x = np.arange(len(semester_grades))
-    y = semester_grades.values
-    slope = np.polyfit(x, y, 1)[0]
-
-    return slope
-
-
-def calculate_grade_stability(student_data):
-    """Стабильность оценок (стандартное отклонение)"""
-    grades = student_data['BALLS'].dropna()
-
-    if len(grades) < 2:
-        return 0
-
-    # Стандартное отклонение оценок
-    std_dev = grades.std()
-
-    return std_dev
-
-
-def calculate_max_grade_drop(student_data):
-    """Максимальное падение оценки между последовательными предметами"""
-    if len(student_data) < 2:
-        return 0
-
-    if 'EXAM_DATE' in student_data.columns and student_data['EXAM_DATE'].notna().any():
-        sorted_data = student_data.dropna(subset=['EXAM_DATE']).sort_values('EXAM_DATE')
-    else:
-        sorted_data = student_data.sort_values(['SEMESTER', 'DNAME'])
-
-    if len(sorted_data) < 2:
-        return 0
-
-    grades = sorted_data['BALLS'].values
-
-    drops = []
-    for i in range(1, len(grades)):
-        drop = grades[i - 1] - grades[i]
-        if drop > 0:
-            drops.append(drop)
-
-    if drops:
-        return max(drops)
-    else:
-        return 0
-
-
-def calculate_grade_distribution(student_data):
-    """Доли оценок разных категорий"""
-    grades = student_data['BALLS'].dropna()
-
-    if len(grades) == 0:
-        return {
-            'excellent_ratio': 0,
-            'good_ratio': 0,
-            'satisfactory_ratio': 0,
-            'fail_ratio': 0,
-            'critical_fail_ratio': 0
-        }
-
-    total_grades = len(grades)
-
-    excellent_ratio = (grades > 85).sum() / total_grades
-
-    good_ratio = ((grades >= 70) & (grades <= 85)).sum() / total_grades
-
-    satisfactory_ratio = ((grades >= 60) & (grades < 70)).sum() / total_grades
-
-    fail_ratio = (grades < 60).sum() / total_grades
-
-    critical_fail_ratio = (grades < 40).sum() / total_grades
-
-    return {
-        'excellent_ratio': excellent_ratio,
-        'good_ratio': good_ratio,
-        'satisfactory_ratio': satisfactory_ratio,
-        'fail_ratio': fail_ratio,
-        'critical_fail_ratio': critical_fail_ratio
-    }
 
 def create_student_features(df):
     features_list = []
 
     for student_id in df['PK'].unique():
         student_data = df[df['PK'] == student_id]
+
+        student_data = student_data.drop_duplicates(subset=['SEMESTER', 'BALLS', 'TYPE', 'DNAME', 'MARK'])
 
         features = {'student_id': student_id}
 
@@ -111,17 +19,15 @@ def create_student_features(df):
 
         grades = student_data['BALLS'].dropna()
         features['avg_grade'] = grades.mean()
-        features['max_grade'] = grades.max()
-        features['min_grade'] = grades.min()
         features['total_subjects'] = len(student_data)
         features['total_grades'] = len(grades)
 
-        features['grade_trend'] = calculate_grade_trend(student_data)
-        features['grade_stability'] = calculate_grade_stability(student_data)
-        features['max_grade_drop'] = calculate_max_grade_drop(student_data)
+        for i in range(1, 5):
+            sem_grades = student_data[student_data['SEMESTER'] == i]['BALLS'].dropna()
+            features[f'sem_{i}_avg'] = sem_grades.mean() if len(sem_grades) > 0 else 0
 
-        grade_distribution = calculate_grade_distribution(student_data)
-        features.update(grade_distribution)
+        features['course_1_avg'] = student_data[student_data['SEMESTER'].isin([1, 2])]['BALLS'].dropna().mean()
+        features['course_2_avg'] = student_data[student_data['SEMESTER'].isin([3, 4])]['BALLS'].dropna().mean()
 
         features['zach_count'] = (student_data['TYPE'] == 'зач').sum()
         features['exam_count'] = (student_data['TYPE'] == 'экз').sum()
@@ -171,13 +77,13 @@ train_df['direction_encoded'] = le_direction.transform(train_df['direction'].fil
 test_df['direction_encoded'] = le_direction.transform(test_df['direction'].fillna('Unknown'))
 
 feature_columns = [
-    'admission_year', 'avg_grade', 'max_grade', 'min_grade', 'grade_trend',
-    #'grade_stability', 'max_grade_drop',
-    #'excellent_ratio', 'good_ratio', 'satisfactory_ratio', 'fail_ratio', 'critical_fail_ratio',
+    'admission_year', 'avg_grade',
     'total_subjects', 'total_grades', 'zach_count', 'exam_count',
     'studying_count', 'expelled_count', 'academic_count',
     'ever_expelled', 'ever_academic',
-    'faculty_encoded', 'direction_encoded'
+    'faculty_encoded', 'direction_encoded',
+    'sem_1_avg', 'sem_2_avg', 'sem_3_avg', 'sem_4_avg',
+    'course_1_avg', 'course_2_avg'
 ]
 
 X_train = train_df[feature_columns].fillna(0)
