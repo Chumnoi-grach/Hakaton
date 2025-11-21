@@ -1,39 +1,100 @@
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import GridSearchCV
 
-def max_consecutive_fails(grades):
-    """Максимальное количество несданных подряд"""
-    fails = (grades < 60).astype(int)
-    max_streak = 0
-    current_streak = 0
 
-    for fail in fails:
-        if fail == 1:
-            current_streak += 1
-            max_streak = max(max_streak, current_streak)
-        else:
-            current_streak = 0
+def calculate_grade_trend(student_data):
+    """Тренд успеваемости по семестрам"""
+    if len(student_data) < 2:
+        return 0
 
-    return max_streak
+    semester_grades = student_data.groupby('SEMESTER')['BALLS'].mean().sort_index()
 
-def create_academic_features(student_data):
-    features = {}
+    if len(semester_grades) < 2:
+        return 0
 
+    # Рассчитываем линейный тренд (коэффициент наклона)
+    x = np.arange(len(semester_grades))
+    y = semester_grades.values
+    slope = np.polyfit(x, y, 1)[0]
+
+    return slope
+
+
+def calculate_grade_stability(student_data):
+    """Стабильность оценок (стандартное отклонение)"""
     grades = student_data['BALLS'].dropna()
-    semesters = student_data['SEMESTER'].unique()
 
-    if len(semesters) > 1:
-        first_semester_avg = student_data[student_data['SEMESTER'] == min(semesters)]['BALLS'].mean()
-        last_semester_avg = student_data[student_data['SEMESTER'] == max(semesters)]['BALLS'].mean()
-        features['grade_progress'] = last_semester_avg - first_semester_avg  # рост/падение
+    if len(grades) < 2:
+        return 0
 
-    features['consecutive_fails'] = max_consecutive_fails(grades)  # максимальное кол-во подряд несданных
-    features['has_critical_fail'] = (grades < 40).any().astype(int)  # был ли полный провал
+    # Стандартное отклонение оценок
+    std_dev = grades.std()
 
-    return features
+    return std_dev
 
+
+def calculate_max_grade_drop(student_data):
+    """Максимальное падение оценки между последовательными предметами"""
+    if len(student_data) < 2:
+        return 0
+
+    if 'EXAM_DATE' in student_data.columns and student_data['EXAM_DATE'].notna().any():
+        sorted_data = student_data.dropna(subset=['EXAM_DATE']).sort_values('EXAM_DATE')
+    else:
+        sorted_data = student_data.sort_values(['SEMESTER', 'DNAME'])
+
+    if len(sorted_data) < 2:
+        return 0
+
+    grades = sorted_data['BALLS'].values
+
+    drops = []
+    for i in range(1, len(grades)):
+        drop = grades[i - 1] - grades[i]
+        if drop > 0:
+            drops.append(drop)
+
+    if drops:
+        return max(drops)
+    else:
+        return 0
+
+
+def calculate_grade_distribution(student_data):
+    """Доли оценок разных категорий"""
+    grades = student_data['BALLS'].dropna()
+
+    if len(grades) == 0:
+        return {
+            'excellent_ratio': 0,
+            'good_ratio': 0,
+            'satisfactory_ratio': 0,
+            'fail_ratio': 0,
+            'critical_fail_ratio': 0
+        }
+
+    total_grades = len(grades)
+
+    excellent_ratio = (grades > 85).sum() / total_grades
+
+    good_ratio = ((grades >= 70) & (grades <= 85)).sum() / total_grades
+
+    satisfactory_ratio = ((grades >= 60) & (grades < 70)).sum() / total_grades
+
+    fail_ratio = (grades < 60).sum() / total_grades
+
+    critical_fail_ratio = (grades < 40).sum() / total_grades
+
+    return {
+        'excellent_ratio': excellent_ratio,
+        'good_ratio': good_ratio,
+        'satisfactory_ratio': satisfactory_ratio,
+        'fail_ratio': fail_ratio,
+        'critical_fail_ratio': critical_fail_ratio
+    }
 
 def create_student_features(df):
     features_list = []
@@ -55,6 +116,13 @@ def create_student_features(df):
         features['total_subjects'] = len(student_data)
         features['total_grades'] = len(grades)
 
+        features['grade_trend'] = calculate_grade_trend(student_data)
+        features['grade_stability'] = calculate_grade_stability(student_data)
+        features['max_grade_drop'] = calculate_max_grade_drop(student_data)
+
+        grade_distribution = calculate_grade_distribution(student_data)
+        features.update(grade_distribution)
+
         features['zach_count'] = (student_data['TYPE'] == 'зач').sum()
         features['exam_count'] = (student_data['TYPE'] == 'экз').sum()
 
@@ -65,8 +133,6 @@ def create_student_features(df):
 
         features['ever_expelled'] = 1 if features['expelled_count'] > 0 else 0
         features['ever_academic'] = 1 if features['academic_count'] > 0 else 0
-
-        features.update(create_academic_features(student_data))
 
         if 'выпуск' in student_data.columns and pd.notna(first_row['выпуск']):
             features['target'] = 1 if first_row['выпуск'] == 'выпустился' else 0
@@ -105,7 +171,9 @@ train_df['direction_encoded'] = le_direction.transform(train_df['direction'].fil
 test_df['direction_encoded'] = le_direction.transform(test_df['direction'].fillna('Unknown'))
 
 feature_columns = [
-    'admission_year', 'avg_grade', 'max_grade', 'min_grade',
+    'admission_year', 'avg_grade', 'max_grade', 'min_grade', 'grade_trend',
+    #'grade_stability', 'max_grade_drop',
+    #'excellent_ratio', 'good_ratio', 'satisfactory_ratio', 'fail_ratio', 'critical_fail_ratio',
     'total_subjects', 'total_grades', 'zach_count', 'exam_count',
     'studying_count', 'expelled_count', 'academic_count',
     'ever_expelled', 'ever_academic',
@@ -116,7 +184,15 @@ X_train = train_df[feature_columns].fillna(0)
 y_train = train_df['target']
 X_test = test_df[feature_columns].fillna(0)
 
-model = RandomForestClassifier(n_estimators=100, random_state=42)
+#model = RandomForestClassifier(n_estimators=100, random_state=42)
+model = RandomForestClassifier(
+    n_estimators=200,
+    max_depth=10,
+    min_samples_split=10,
+    min_samples_leaf=2,
+    max_features='sqrt',
+    random_state=42
+)
 model.fit(X_train, y_train)
 
 test_predictions = model.predict(X_test)
