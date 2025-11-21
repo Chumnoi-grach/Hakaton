@@ -39,8 +39,6 @@ def calculate_trend(series):
 
 
 def extract_features(df):
-    print("--- Генерация фичей (это может занять время) ---")
-
     # Предварительная обработка оценок
     df['BALLS_NUM'] = pd.to_numeric(df['BALLS'], errors='coerce')
 
@@ -52,7 +50,7 @@ def extract_features(df):
         'Факультет': 'first',
         'Направление': 'first',
         'год поступления': 'first',
-        'BALLS_NUM': ['mean', 'max', 'min', 'std', 'count', 'last'],  # last - последняя оценка
+        'BALLS_NUM': ['mean', 'max', 'min', 'std', 'count', 'last'],
         'выпуск': 'first'
     })
 
@@ -67,28 +65,25 @@ def extract_features(df):
         'BALLS_NUM_min': 'min_grade',
         'BALLS_NUM_std': 'std_grade',  # Стабильность (чем меньше, тем стабильнее)
         'BALLS_NUM_count': 'total_grades',
-        'BALLS_NUM_last': 'last_grade',  # Важный маркер
+        'BALLS_NUM_last': 'last_grade',
         'выпуск_first': 'target_raw'
     })
 
-    # 2. Сложные фичи (через apply)
+    # 2. Сложные фичи
     def advanced_stats(x):
         d = {}
-        # -- Долги и проблемы --
-        # Считаем двойки (неуды)
+        # Считаем двойки
         grades = pd.to_numeric(x['BALLS'], errors='coerce')
         d['fail_count'] = (grades < 3).sum()
         d['low_grade_count'] = (grades == 3).sum()  # Тройки тоже зона риска
         d['excellent_count'] = (grades == 5).sum()
 
-        # -- Статусы --
+        # Статусы
         statuses = x['Unnamed: 5'].value_counts()
-        d['expelled_history'] = statuses.get('отчислен', 0)  # Был ли уже отчислен ранее
+        d['expelled_history'] = statuses.get('отчислен', 0)
         d['academic_leave'] = statuses.get('академ', 0)
 
-        # -- Тренд успеваемости --
-        # (Вызываем функцию тренда, определенную выше)
-        # Мы берем grades, так как это Series всех оценок студента
+        # Тренд успеваемости
         if len(grades) > 1:
             mid = len(grades) // 2
             d['grade_trend'] = grades.iloc[mid:].mean() - grades.iloc[:mid].mean()
@@ -120,7 +115,7 @@ def add_target_encoding(train_df, test_df, cat_cols):
     Считает средний target (процент выпускников) по категории в TRAIN
     и мапит это значение в TRAIN и TEST.
     """
-    print("--- Добавление Target Encoding (Сложность факультетов) ---")
+    print("Сложность факультетов")
 
     for col in cat_cols:
         # Считаем вероятность выпуска для каждой категории (факультета/направления)
@@ -155,7 +150,7 @@ def train_and_predict(df):
         train_df[col] = train_df[col].astype(str).fillna('Unknown')
         test_df[col] = test_df[col].astype(str).fillna('Unknown')
 
-    # --- ВНЕДРЕНИЕ СЛОЖНОСТИ ФАКУЛЬТЕТОВ ---
+    # Сложность факультетов
     train_df, test_df = add_target_encoding(train_df, test_df, cat_features)
 
     # Формируем X и y
@@ -164,11 +159,11 @@ def train_and_predict(df):
     y = train_df['target']
     X_test = test_df.drop(columns=drop_cols)
 
-    # Валидация (чтобы убедиться в качестве перед отправкой)
+    # Убеждаемся в качестве пере отправкой
     X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(X, y, test_size=0.2, random_state=42,
                                                                               stratify=y)
 
-    # --- НАСТРОЙКИ CATBOOST (High Performance) ---
+    # НАСТРОЙКИ CATBOOST
     model = CatBoostClassifier(
         iterations=2000,  # Много итераций
         learning_rate=0.02,  # Медленно, но верно спускаемся к минимуму ошибки
@@ -221,11 +216,6 @@ def train_and_predict(df):
         'PK': test_df['PK'],
         'выпуск': test_predictions.astype(int)
     })
-
-    # Мапим обратно в слова, если нужно (но обычно просят 0/1).
-    # В твоем примере было 'выпуск' с предиктами.
-    # Если просят слова 'выпустился'/'отчислен', раскомментируй строку ниже:
-    # submission['выпуск'] = submission['выпуск'].map({1: 'выпустился', 0: 'отчислен'})
 
     submission.to_csv('submission 84.80%.csv', index=False)
     print(f"\nФайл submission 84.80%.csv сохранен! Предсказано выпускников: {sum(test_predictions)}")
