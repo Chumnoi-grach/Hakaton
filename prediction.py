@@ -1,8 +1,39 @@
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report
+
+def max_consecutive_fails(grades):
+    """Максимальное количество несданных подряд"""
+    fails = (grades < 60).astype(int)
+    max_streak = 0
+    current_streak = 0
+
+    for fail in fails:
+        if fail == 1:
+            current_streak += 1
+            max_streak = max(max_streak, current_streak)
+        else:
+            current_streak = 0
+
+    return max_streak
+
+def create_academic_features(student_data):
+    features = {}
+
+    grades = student_data['BALLS'].dropna()
+    semesters = student_data['SEMESTER'].unique()
+
+    if len(semesters) > 1:
+        first_semester_avg = student_data[student_data['SEMESTER'] == min(semesters)]['BALLS'].mean()
+        last_semester_avg = student_data[student_data['SEMESTER'] == max(semesters)]['BALLS'].mean()
+        features['grade_progress'] = last_semester_avg - first_semester_avg  # рост/падение
+
+    features['consecutive_fails'] = max_consecutive_fails(grades)  # максимальное кол-во подряд несданных
+    features['has_critical_fail'] = (grades < 40).any().astype(int)  # был ли полный провал
+
+    return features
+
 
 def create_student_features(df):
     features_list = []
@@ -34,6 +65,8 @@ def create_student_features(df):
 
         features['ever_expelled'] = 1 if features['expelled_count'] > 0 else 0
         features['ever_academic'] = 1 if features['academic_count'] > 0 else 0
+
+        features.update(create_academic_features(student_data))
 
         if 'выпуск' in student_data.columns and pd.notna(first_row['выпуск']):
             features['target'] = 1 if first_row['выпуск'] == 'выпустился' else 0
@@ -86,15 +119,10 @@ X_test = test_df[feature_columns].fillna(0)
 model = RandomForestClassifier(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
 
-train_predictions = model.predict(X_train)
-accuracy = accuracy_score(y_train, train_predictions)
-print(f"Accuracy на обучающей выборке: {accuracy:.3f}")
-print(classification_report(y_train, train_predictions))
-
 test_predictions = model.predict(X_test)
 
 submission = pd.DataFrame({
-    'PK': test_df['student_id'],
+    'ID': test_df['student_id'],
     'выпуск': test_predictions
 })
 
