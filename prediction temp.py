@@ -8,22 +8,34 @@ import numpy as np
 
 #data preparation
 def remove_balls(df):
-    mask_to_remove = (df['BALLS'] == 0.0) & (df['MARK'].isin(['ня', 'нд', 'з']))
-    df = df[~mask_to_remove]
+    mask_to_fix = (df['BALLS'] == 0.0) & (df['MARK'].isin(['ня', 'нд', 'з']))
+    df.loc[mask_to_fix, 'BALLS'] = np.nan
+    return df
 
-def get_random_ball(mark):
-    if mark == '3':
-        return 55
-    elif mark == '4':
-        return 75
-    elif mark == '5':
-        return 88
-    else:
-        return 0
-
-def fill_balls(df):
+def fill_balls_with_mean(df):
+    mean_balls_by_mark = df.groupby('MARK')['BALLS'].mean().to_dict()
     mask_missing_balls = df['BALLS'].isna() & df['MARK'].isin(['2', '3', '4', '5'])
-    df.loc[mask_missing_balls, 'BALLS'] = df.loc[mask_missing_balls, 'MARK'].apply(get_random_ball)
+
+    def get_mean_ball(mark):
+        return mean_balls_by_mark.get(mark, 0)
+
+    df.loc[mask_missing_balls, 'BALLS'] = df.loc[mask_missing_balls, 'MARK'].apply(get_mean_ball)
+    return df
+
+def round_balls_to_int(df):
+    df['BALLS'] = df['BALLS'].apply(lambda x: int(round(x)) if pd.notna(x) else x)
+    return df
+
+
+def fill_balls_from_grade(df):
+    mask = (df['MARK'] == 'з') & (df['BALLS'].isna()) & (df['GRADE'].notna())
+    grade_medians = df.groupby('GRADE')['BALLS'].median().to_dict()
+
+    def get_median_by_grade(grade):
+        return grade_medians.get(grade, None)
+
+    df.loc[mask, 'BALLS'] = df.loc[mask, 'GRADE'].apply(get_median_by_grade)
+    return df
 
 
 #make features
@@ -71,19 +83,19 @@ def sem_drops_feature(student_data, features):
         features[f'sem{i + 1}-{i}_drop'] = features[f'sem_{i + 1}_avg'] - features[f'sem_{i}_avg']
         features[f'sem{i + 1}-{i}_drop_bin'] = 1 if features[f'sem{i + 1}-{i}_drop'] < 0 else 0
 
-def debts_feature(student_data, features):
+def zachet_feature(student_data, features):
     debt_mask = (student_data['BALLS'].isna()) | (student_data['MARK'] == 'з')
-    debts_data = student_data[debt_mask]
-    features['dolgi'] = len(debts_data)
+    zachet_data = student_data[debt_mask]
+    features['zachet'] = len(zachet_data)
     for sem in range(1, 5):
-        features[f'dolgi_sem{sem}'] = len(debts_data[debts_data['SEMESTER'] == sem])
+        features[f'zachet_sem{sem}'] = len(zachet_data[zachet_data['SEMESTER'] == sem])
 
-def closed_debts_feature(student_data, features):
+def closed_zachet_feature(student_data, features):
     closed_debt_mask = (student_data['BALLS'].notna()) | (student_data['MARK'] == 'з')
-    closed_debts_data = student_data[closed_debt_mask]
-    features['closed_dolgi'] = len(closed_debts_data)
+    closed_zachet_data = student_data[closed_debt_mask]
+    features['closed_zachet'] = len(closed_zachet_data)
     for sem in range(1, 5):
-        features[f'closed_dolgi_sem{sem}'] = len(closed_debts_data[closed_debts_data['SEMESTER'] == sem])
+        features[f'closed_zachet_sem{sem}'] = len(closed_zachet_data[closed_zachet_data['SEMESTER'] == sem])
 
 def zach_feature(student_data, features):
     features['zach_count'] = (student_data['TYPE'] == 'зач').sum()
@@ -102,6 +114,15 @@ def target_feature(student_data, features):
     if 'выпуск' in student_data.columns and pd.notna(first_row['выпуск']):
         features['target'] = 1 if first_row['выпуск'] == 'выпустился' else 0
 
+def nia_feature(student_data, features):
+    features['nia'] = (student_data['MARK'] == 'ня').sum()
+
+def nd_feature(student_data, features):
+    features['nd'] = (student_data['MARK'] == 'нд').sum()
+
+def nz_feature(student_data, features):
+    features['nz'] = (student_data['MARK'] == 'нз').sum()
+
 def create_student_features(df):
     features_list = []
     for student_id in df['PK'].unique():
@@ -114,12 +135,15 @@ def create_student_features(df):
         correlation_cource_feature(student_data, features)
         gpa_drops_feature(student_data, features)
         sem_drops_feature(student_data, features)
-        debts_feature(student_data, features)
-        closed_debts_feature(student_data, features)
+        zachet_feature(student_data, features)
+        closed_zachet_feature(student_data, features)
         zach_feature(student_data, features)
         exam_feature(student_data, features)
         status_counts_feature(student_data, features)
         target_feature(student_data, features)
+        nia_feature(student_data, features)
+        nd_feature(student_data, features)
+        nz_feature(student_data, features)
         features_list.append(features)
     return pd.DataFrame(features_list)
 
@@ -129,8 +153,10 @@ marking = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/marking.cs
 df = data.merge(marking, left_on='PK', right_on='ИД', how='left')
 df = df.drop_duplicates(subset=['PK', 'SEMESTER', 'BALLS', 'TYPE', 'DNAME', 'MARK'])
 
-remove_balls(df)
-fill_balls(df)
+df = remove_balls(df)
+df = fill_balls_with_mean(df)
+df = round_balls_to_int(df)
+df = fill_balls_from_grade(df)
 
 df.to_csv('cleaned_data.csv', index=False)
 
@@ -156,8 +182,9 @@ feature_columns = [
     'sem2-1_drop', 'sem2-1_drop_bin',
     'correlation_sem', 'p_value_sem',
     'correlation_cource', 'p_value_cource',
-    'dolgi', 'dolgi_sem1', 'dolgi_sem2', 'dolgi_sem3', 'dolgi_sem4',
-    'closed_dolgi', 'closed_dolgi_sem1', 'closed_dolgi_sem2', 'closed_dolgi_sem3', 'closed_dolgi_sem4'
+    'zachet', 'zachet_sem1', 'zachet_sem2', 'zachet_sem3', 'zachet_sem4',
+    'closed_zachet', 'closed_zachet_sem1', 'closed_zachet_sem2', 'closed_zachet_sem3', 'closed_zachet_sem4',
+    'nia', 'nd', 'nz'
 ]
 
 X_train = train_df[feature_columns].fillna(0)
