@@ -4,7 +4,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import shap
-import numpy as np
 
 def create_student_features(df):
     features_list = []
@@ -52,8 +51,8 @@ def create_student_features(df):
 
     return pd.DataFrame(features_list)
 
-data = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/data.csv')
-marking = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
+data = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/data.csv')
+marking = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
 
 df = data.merge(marking, left_on='PK', right_on='ИД', how='left')
 
@@ -119,7 +118,7 @@ submission.to_csv('submission.csv', index=False)
 print(f"Создан файл submission.csv с {len(submission)} предсказаниями")
 print(f"Выпускников предсказано: {test_predictions.sum()} из {len(test_predictions)}")
 
-os.makedirs('analysis_plots', exist_ok=True)
+os.makedirs('../../analysis_plots', exist_ok=True)
 
 feature_imp_df = pd.DataFrame({
     'feature': feature_columns,
@@ -160,3 +159,104 @@ plt.tight_layout()
 plt.savefig('analysis_plots/shap_summary.png', dpi=300, bbox_inches='tight')
 plt.show()
 plt.close()
+
+
+
+# --------------------
+
+
+import seaborn as sns
+from sklearn.inspection import PartialDependenceDisplay
+from sklearn.model_selection import cross_val_predict
+from sklearn.metrics import confusion_matrix, RocCurveDisplay
+
+# --- БЛОК 1: Настройка визуализации ---
+sns.set_style("whitegrid")
+plt.rcParams['figure.figsize'] = (12, 8)
+
+# --- БЛОК 2: Корреляция признаков с целевой переменной ---
+# Помогает понять линейные зависимости
+plt.figure(figsize=(14, 12))
+corr_matrix = train_df[feature_columns + ['target']].corr()
+# Рисуем только нижний треугольник для чистоты
+mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+sns.heatmap(corr_matrix, mask=mask, annot=False, cmap='coolwarm', center=0, linewidths=0.5)
+plt.title('Корреляционная матрица признаков')
+plt.tight_layout()
+plt.savefig('analysis_plots/correlation_matrix.png', dpi=300)
+plt.close()
+
+# --- БЛОК 3: Сравнение распределений (Отчислен vs Выпустился) ---
+# Выбираем топ-4 самых важных признака из модели
+top_features = feature_imp_df['feature'][:4].values
+
+fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+axes = axes.flatten()
+
+for i, col in enumerate(top_features):
+    # Используем Violin plot для отображения плотности распределения
+    sns.violinplot(data=train_df, x='target', y=col, ax=axes[i], palette="muted", split=True)
+    axes[i].set_title(f'Распределение: {col}')
+    axes[i].set_xlabel('Статус (0 - Отчислен, 1 - Выпуск)')
+
+plt.tight_layout()
+plt.savefig('analysis_plots/distributions_top_features.png', dpi=300)
+plt.close()
+
+# --- БЛОК 4: Partial Dependence Plots (PDP) ---
+# Показывает, как меняется вероятность выпуска при изменении значения признака
+print("Генерация Partial Dependence Plots...")
+common_features = [col for col in ['avg_grade', 'course_1_avg', 'studying_count', 'exam_count'] if
+                   col in X_train.columns]
+
+if common_features:
+    fig, ax = plt.subplots(figsize=(14, 10))
+    PartialDependenceDisplay.from_estimator(
+        model,
+        X_train,
+        common_features,
+        kind="average",  # Показывает среднее влияние
+        ax=ax
+    )
+    plt.suptitle('Влияние изменения значения признака на вероятность выпуска', y=1.02, fontsize=16)
+    plt.tight_layout()
+    plt.savefig('analysis_plots/partial_dependence.png', dpi=300)
+    plt.close()
+
+# --- БЛОК 5: SHAP Dependence Plots (Взаимодействия) ---
+# Показывает, как один признак меняет влияние другого
+# Например: как влияет средний балл (x) на вывод модели (y), и зависит ли это от количества "удовлетворительно" (цвет)
+if 'avg_grade' in X_train.columns:
+    plt.figure(figsize=(10, 7))
+    # shap_values_array мы берем из твоего кода выше (где ты обрабатывал shap_values)
+    # Нужно найти индекс признака avg_grade
+    feature_idx = X_train.columns.get_loc("avg_grade")
+
+    shap.dependence_plot(
+        "avg_grade",
+        shap_values_array,
+        X_train,
+        interaction_index="course_1_avg",  # Смотрим взаимодействие с 1 курсом
+        show=False
+    )
+    plt.title("Влияние среднего балла с учетом успеваемости на 1 курсе")
+    plt.tight_layout()
+    plt.savefig('analysis_plots/shap_dependence_avg_grade.png', dpi=300)
+    plt.close()
+
+# --- БЛОК 6: Confusion Matrix на обучающей выборке (через кросс-валидацию) ---
+# Чтобы честно оценить, где модель ошибается
+y_pred_cv = cross_val_predict(model, X_train, y_train, cv=5)
+conf_mat = confusion_matrix(y_train, y_pred_cv)
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_mat, annot=True, fmt='d', cmap='Blues', cbar=False,
+            xticklabels=['Отчислен (Предсказано)', 'Выпуск (Предсказано)'],
+            yticklabels=['Отчислен (Факт)', 'Выпуск (Факт)'])
+plt.title('Матрица ошибок (Confusion Matrix) - Cross Validation')
+plt.ylabel('Истина')
+plt.xlabel('Предсказание')
+plt.savefig('analysis_plots/confusion_matrix.png', dpi=300)
+plt.close()
+
+print("Все графики успешно сохранены в папку 'analysis_plots'")

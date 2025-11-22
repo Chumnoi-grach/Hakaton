@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier
 
-data = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/data.csv')
-marking = pd.read_csv('kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
+data = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/data.csv')
+marking = pd.read_csv('../../kaggle/input/nstu-hach-ai-track-education-case/marking.csv')
 
 df = data.merge(marking, left_on='PK', right_on='ИД', how='left')
 
