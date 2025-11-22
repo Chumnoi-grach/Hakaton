@@ -221,6 +221,7 @@ feature_imp_df = pd.DataFrame({
 
 print(feature_imp_df.head(15))
 
+#Топ самых важных признаков
 plt.figure(figsize=(12, 8))
 plt.barh(feature_imp_df['feature'][:15], feature_imp_df['importance'][:15])
 plt.xlabel('Важность')
@@ -230,6 +231,7 @@ plt.savefig('analysis_plots/rf_feature_importance.png', dpi=300, bbox_inches='ti
 plt.show()
 plt.close()
 
+#Исследования по snap
 explainer = shap.TreeExplainer(model)
 shap_values = explainer(X_train)
 
@@ -253,6 +255,197 @@ plt.savefig('analysis_plots/shap_summary.png', dpi=300, bbox_inches='tight')
 plt.show()
 plt.close()
 
+# Распределение признаков по классам
+top_features = feature_imp_df['feature'].head(5).tolist()
+
+n_cols = 3
+n_rows = (len(top_features) + n_cols - 1) // n_cols
+
+plt.figure(figsize=(15, 5 * n_rows))
+for i, feature in enumerate(top_features, 1):
+    plt.subplot(n_rows, n_cols, i)
+
+    # Данные для класса 0 и 1
+    feature_class_0 = X_train[y_train == 0][feature]
+    feature_class_1 = X_train[y_train == 1][feature]
+
+    plt.hist(feature_class_0, bins=30, alpha=0.7, label='Не выпустились', color='red', density=True)
+    plt.hist(feature_class_1, bins=30, alpha=0.7, label='Выпустились', color='green', density=True)
+
+    plt.xlabel(feature)
+    plt.ylabel('Плотность')
+    plt.legend()
+    plt.title(f'Распределение {feature}')
+
+plt.tight_layout()
+plt.savefig('analysis_plots/feature_distributions.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
+
+#ROC-кривая
+from sklearn.metrics import roc_curve, auc, RocCurveDisplay
+
+plt.figure(figsize=(10, 8))
+
+y_train_proba = model.predict_proba(X_train)[:, 1]
+fpr, tpr, thresholds = roc_curve(y_train, y_train_proba)
+roc_auc = auc(fpr, tpr)
+
+plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.3f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random classifier')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC-кривая (Random Forest)')
+plt.legend(loc="lower right")
+plt.grid(alpha=0.3)
+
+gmeans = np.sqrt(tpr * (1 - fpr))
+ix = np.argmax(gmeans)
+optimal_threshold = thresholds[ix]
+plt.scatter(fpr[ix], tpr[ix], marker='o', color='black', label=f'Optimal threshold: {optimal_threshold:.3f}')
+
+plt.legend()
+plt.tight_layout()
+plt.savefig('analysis_plots/roc_curve.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
+
+print(f"ROC-AUC: {roc_auc:.4f}")
+print(f"Оптимальный порог: {optimal_threshold:.4f}")
+print(f"При оптимальном пороге:")
+print(f"  True Positive Rate: {tpr[ix]:.4f}")
+print(f"  False Positive Rate: {fpr[ix]:.4f}")
+
+#Precision-Recall кривая
+from sklearn.metrics import precision_recall_curve, average_precision_score
+
+plt.figure(figsize=(10, 8))
+
+#Вычисляем Precision-Recall
+precision, recall, thresholds = precision_recall_curve(y_train, y_train_proba)
+average_precision = average_precision_score(y_train, y_train_proba)
+
+plt.plot(recall, precision, color='blue', lw=2,
+         label=f'PR curve (AP = {average_precision:.3f})')
+
+baseline = len(y_train[y_train == 1]) / len(y_train)
+plt.axhline(y=baseline, color='red', linestyle='--',
+            label=f'Random classifier (AP = {baseline:.3f})')
+
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Recall (Полнота)')
+plt.ylabel('Precision (Точность)')
+plt.title('Precision-Recall кривая (Random Forest)')
+plt.legend(loc="upper right")
+plt.grid(alpha=0.3)
+
+f1_scores = 2 * (precision * recall) / (precision + recall + 1e-8)
+ix = np.argmax(f1_scores)
+optimal_threshold_pr = thresholds[ix] if ix < len(thresholds) else thresholds[-1]
+
+plt.scatter(recall[ix], precision[ix], marker='o', color='black',
+           label=f'Optimal F1: P={precision[ix]:.3f}, R={recall[ix]:.3f}')
+
+plt.legend()
+plt.tight_layout()
+plt.savefig('analysis_plots/precision_recall_curve.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
+
+print(f"Average Precision (AP): {average_precision:.4f}")
+print(f"Базовая линия (случайный классификатор): {baseline:.4f}")
+print(f"Оптимальная точка по F1-score:")
+print(f"  Precision: {precision[ix]:.4f}")
+print(f"  Recall: {recall[ix]:.4f}")
+print(f"  F1-score: {f1_scores[ix]:.4f}")
+print(f"  Порог: {optimal_threshold_pr:.4f}")
+
+#Калибровочная кривая
+from sklearn.calibration import calibration_curve
+
+plt.figure(figsize=(10, 8))
+
+prob_true, prob_pred = calibration_curve(y_train, y_train_proba, n_bins=10, strategy='quantile')
+
+plt.plot(prob_pred, prob_true, marker='o', linewidth=2, label='Random Forest')
+plt.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Идеально откалибровано')
+
+plt.xlabel('Предсказанная вероятность')
+plt.ylabel('Доля положительных классов')
+plt.title('Калибровочная кривая')
+plt.legend()
+plt.grid(alpha=0.3)
+
+plt.twinx()
+plt.hist(y_train_proba, bins=20, alpha=0.3, color='orange', density=True)
+plt.ylabel('Плотность вероятностей')
+plt.tight_layout()
+plt.savefig('analysis_plots/calibration_curve.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
+
+plt.figure(figsize=(12, 8))
+
+fraction_of_positives, mean_predicted_value = calibration_curve(
+    y_train, y_train_proba, n_bins=10, strategy='quantile'
+)
+
+plt.subplot(2, 1, 1)
+plt.plot(mean_predicted_value, fraction_of_positives, "s-", label="Random Forest")
+plt.plot([0, 1], [0, 1], "k:", label="Идеальная калибровка")
+plt.ylabel("Доля положительных классов")
+plt.title('Калибровочная кривая с бинами')
+plt.legend()
+plt.grid(alpha=0.3)
+
+calibration_df = pd.DataFrame({
+    'bin_center': mean_predicted_value,
+    'actual_fraction': fraction_of_positives,
+    'calibration_error': np.abs(mean_predicted_value - fraction_of_positives)
+})
+
+print("Анализ калибровки по бинам:")
+print(calibration_df.round(4))
+print(f"\nСредняя ошибка калибровки: {calibration_df['calibration_error'].mean():.4f}")
+print(f"Максимальная ошибка калибровки: {calibration_df['calibration_error'].max():.4f}")
+
+from sklearn.metrics import brier_score_loss
+brier_score = brier_score_loss(y_train, y_train_proba)
+print(f"Brier score: {brier_score:.4f} (чем меньше, тем лучше)")
+
+if brier_score < 0.1:
+    calibration_quality = "отличная"
+elif brier_score < 0.2:
+    calibration_quality = "хорошая"
+elif brier_score < 0.3:
+    calibration_quality = "удовлетворительная"
+else:
+    calibration_quality = "плохая"
+
+print(f"Качество калибровки: {calibration_quality}")
+
+#Дисперсия топ-10 признаков
+plt.figure(figsize=(12, 6))
+top_10_features = feature_imp_df['feature'].head(10).tolist()
+
+variances = []
+for feature in top_10_features:
+    variance = X_train[feature].var()
+    variances.append(variance)
+
+plt.bar(top_10_features, variances, color='skyblue', alpha=0.7)
+plt.xticks(rotation=45, ha='right')
+plt.ylabel('Дисперсия')
+plt.title('Дисперсия топ-10 самых важных признаков')
+plt.grid(axis='y', alpha=0.3)
+plt.tight_layout()
+plt.savefig('analysis_plots/top_features_variance.png', dpi=300, bbox_inches='tight')
+plt.show()
+plt.close()
+
 # Анализ распределения вероятностей
 plt.figure(figsize=(12, 5))
 
@@ -264,18 +457,6 @@ plt.xlabel('Вероятность выпуска')
 plt.ylabel('Количество студентов')
 plt.legend()
 plt.title('Распределение вероятностей')
-
-plt.subplot(1, 2, 2)
-# Анализ порогов классификации
-from sklearn.metrics import precision_recall_curve
-precision, recall, thresholds = precision_recall_curve(y_train, y_train_proba)
-plt.plot(thresholds, precision[:-1], label='Precision')
-plt.plot(thresholds, recall[:-1], label='Recall')
-plt.xlabel('Порог')
-plt.ylabel('Score')
-plt.legend()
-plt.title('Precision-Recall vs Threshold')
-
 plt.tight_layout()
 plt.savefig('analysis_plots/probability_analysis.png', dpi=300)
 plt.show()
