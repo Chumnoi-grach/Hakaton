@@ -172,8 +172,6 @@ print(f"Тестовая выборка: {len(test_df)} студентов")
 feature_columns = [
     'avg_grade',
     'zach_count', 'exam_count',
-    #'studying_count', 'expelled_count',
-    #'ever_expelled',
     'sem_1_avg', 'sem_2_avg', 'sem_3_avg', 'sem_4_avg',
     'course_1_avg', 'course_2_avg',
     'gpa_drop', 'gpa_drop_bin',
@@ -362,70 +360,6 @@ print(f"  Precision: {precision[ix]:.4f}")
 print(f"  Recall: {recall[ix]:.4f}")
 print(f"  F1-score: {f1_scores[ix]:.4f}")
 print(f"  Порог: {optimal_threshold_pr:.4f}")
-
-#Калибровочная кривая
-from sklearn.calibration import calibration_curve
-
-plt.figure(figsize=(10, 8))
-
-prob_true, prob_pred = calibration_curve(y_train, y_train_proba, n_bins=10, strategy='quantile')
-
-plt.plot(prob_pred, prob_true, marker='o', linewidth=2, label='Random Forest')
-plt.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Идеально откалибровано')
-
-plt.xlabel('Предсказанная вероятность')
-plt.ylabel('Доля положительных классов')
-plt.title('Калибровочная кривая')
-plt.legend()
-plt.grid(alpha=0.3)
-
-plt.twinx()
-plt.hist(y_train_proba, bins=20, alpha=0.3, color='orange', density=True)
-plt.ylabel('Плотность вероятностей')
-plt.tight_layout()
-plt.savefig('analysis_plots/calibration_curve.png', dpi=300, bbox_inches='tight')
-plt.show()
-plt.close()
-
-plt.figure(figsize=(12, 8))
-
-fraction_of_positives, mean_predicted_value = calibration_curve(
-    y_train, y_train_proba, n_bins=10, strategy='quantile'
-)
-
-plt.subplot(2, 1, 1)
-plt.plot(mean_predicted_value, fraction_of_positives, "s-", label="Random Forest")
-plt.plot([0, 1], [0, 1], "k:", label="Идеальная калибровка")
-plt.ylabel("Доля положительных классов")
-plt.title('Калибровочная кривая с бинами')
-plt.legend()
-plt.grid(alpha=0.3)
-
-calibration_df = pd.DataFrame({
-    'bin_center': mean_predicted_value,
-    'actual_fraction': fraction_of_positives,
-    'calibration_error': np.abs(mean_predicted_value - fraction_of_positives)
-})
-
-print("Анализ калибровки по бинам:")
-print(calibration_df.round(4))
-print(f"\nСредняя ошибка калибровки: {calibration_df['calibration_error'].mean():.4f}")
-print(f"Максимальная ошибка калибровки: {calibration_df['calibration_error'].max():.4f}")
-
-from sklearn.metrics import brier_score_loss
-brier_score = brier_score_loss(y_train, y_train_proba)
-print(f"Brier score: {brier_score:.4f} (чем меньше, тем лучше)")
-
-if brier_score < 0.1:
-    calibration_quality = "отличная"
-elif brier_score < 0.2:
-    calibration_quality = "хорошая"
-elif brier_score < 0.3:
-    calibration_quality = "удовлетворительная"
-else:
-    calibration_quality = "плохая"
-
-print(f"Качество калибровки: {calibration_quality}")
 
 #Дисперсия топ-10 признаков
 plt.figure(figsize=(12, 6))
